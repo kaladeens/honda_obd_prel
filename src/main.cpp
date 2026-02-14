@@ -144,8 +144,9 @@ void loop()
 
 void setup()
 {
+  // pin 12 for 1 wire
   Serial.begin(115200);
-  dlcSerial.begin(10400);
+  dlcSerial.begin(9600);
   ecu.init();
   delay(1000);
 }
