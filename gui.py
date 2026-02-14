@@ -27,18 +27,18 @@ class LiveData:
     vss: int = 0
     ect_c: float = 0.0
     iat_c: float = 0.0
-    map_kpa: float = 0.0  # depends what your ecu.maps is (kPa?).
+    map_kpa: float = 0.0
     tps_pct: float = 0.0
     batt_v: float = 0.0
     o2_v: float = 0.0
     flags: int = 0
 
 
-def u16(be_hi, be_lo) -> int:
-    return (be_hi << 8) | be_lo
+def u16(hi, lo) -> int:
+    return (hi << 8) | lo
 
-def s16(be_hi, be_lo) -> int:
-    v = (be_hi << 8) | be_lo
+def s16(hi, lo) -> int:
+    v = (hi << 8) | lo
     if v & 0x8000:
         v -= 0x10000
     return v
@@ -53,7 +53,7 @@ def calc_crc8_sum(header_bytes: bytes, payload: bytes) -> int:
 
 class FrameParser:
     """
-    Parses frames of:
+    Parses frames:
       AA 55 type len payload... crc
     """
     def __init__(self, validate_crc=False):
@@ -64,33 +64,29 @@ class FrameParser:
         self.buf.extend(data)
 
     def _find_sof(self):
-        # find AA 55
         for i in range(max(0, len(self.buf) - 1)):
             if self.buf[i] == SOF1 and self.buf[i+1] == SOF2:
                 return i
         return -1
 
     def next_frame(self):
-        # returns (type, payload_bytes) or None
         while True:
             if len(self.buf) < 4:
                 return None
 
             idx = self._find_sof()
             if idx < 0:
-                # keep last byte in case it's 0xAA start
+                # keep last byte in case it's 0xAA
                 if len(self.buf) > 1:
                     self.buf = self.buf[-1:]
                 return None
 
-            # discard leading junk
             if idx > 0:
                 del self.buf[:idx]
 
             if len(self.buf) < 4:
                 return None
 
-            # header
             sof1, sof2, mtype, length = self.buf[0], self.buf[1], self.buf[2], self.buf[3]
             if sof1 != SOF1 or sof2 != SOF2:
                 del self.buf[0]
@@ -146,7 +142,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Honda OBD UNI2 - Live + DTC")
-        self.geometry("560x360")
+        self.geometry("620x460")
         self.resizable(False, False)
 
         self.ser = None
@@ -159,7 +155,6 @@ class App(tk.Tk):
 
         self._build_ui()
         self._refresh_ports()
-
         self.after(250, self._ui_tick)
 
     def _build_ui(self):
@@ -192,11 +187,13 @@ class App(tk.Tk):
         self.btn_poll = ttk.Button(ctrl, text="Start Live", command=self._toggle_poll, state="disabled")
         self.btn_poll.grid(row=0, column=2, **pad)
 
-        ttk.Button(ctrl, text="Get DTC", command=self._get_dtc, state="disabled").grid(row=0, column=3, **pad)
+        self.btn_dtc = ttk.Button(ctrl, text="Get DTC", command=self._get_dtc, state="disabled")
+        self.btn_dtc.grid(row=0, column=3, **pad)
+
         self.btn_reset = ttk.Button(ctrl, text="RESET ECU", command=self._reset_ecu, state="disabled")
         self.btn_reset.grid(row=0, column=4, **pad)
 
-        # Live display
+        # Live values
         live = ttk.LabelFrame(self, text="Live Data")
         live.pack(fill="x", **pad)
 
@@ -209,7 +206,6 @@ class App(tk.Tk):
             "tps": tk.StringVar(value="—"),
             "batt": tk.StringVar(value="—"),
             "o2": tk.StringVar(value="—"),
-            "flags": tk.StringVar(value="—"),
             "status": tk.StringVar(value="Disconnected"),
         }
 
@@ -218,28 +214,53 @@ class App(tk.Tk):
             ("ECT (°C)", "ect", "IAT (°C)", "iat"),
             ("MAP", "map", "TPS (%)", "tps"),
             ("Batt (V)", "batt", "O2 (V)", "o2"),
-            ("Flags", "flags", "Status", "status"),
+            ("Status", "status", "", ""),
         ]
 
         for r, (l1, k1, l2, k2) in enumerate(rows):
             ttk.Label(live, text=l1 + ":").grid(row=r, column=0, sticky="e", **pad)
             ttk.Label(live, textvariable=self.vars[k1], width=16).grid(row=r, column=1, sticky="w", **pad)
-            ttk.Label(live, text=l2 + ":").grid(row=r, column=2, sticky="e", **pad)
-            ttk.Label(live, textvariable=self.vars[k2], width=22).grid(row=r, column=3, sticky="w", **pad)
+            if l2:
+                ttk.Label(live, text=l2 + ":").grid(row=r, column=2, sticky="e", **pad)
+                ttk.Label(live, textvariable=self.vars[k2], width=22).grid(row=r, column=3, sticky="w", **pad)
+
+        # Indicators
+        ind = ttk.LabelFrame(self, text="Indicators (from flags byte)")
+        ind.pack(fill="x", **pad)
+
+        self.lamps = {}
+
+        def make_lamp(parent, text):
+            f = ttk.Frame(parent)
+            c = tk.Canvas(f, width=18, height=18, highlightthickness=0)
+            c.create_oval(2, 2, 16, 16, fill="gray", outline="black", tags=("lamp",))
+            c.pack(side="left")
+            ttk.Label(f, text=text, width=7).pack(side="left", padx=(6, 0))
+            f.pack(side="left", padx=12, pady=4)
+            return c
+
+        self.lamps["ac"]    = make_lamp(ind, "A/C")
+        self.lamps["brake"] = make_lamp(ind, "BRAKE")
+        self.lamps["vtec"]  = make_lamp(ind, "VTEC")
+        self.lamps["cel"]   = make_lamp(ind, "CEL")
+
+        self.vtec_big = tk.StringVar(value="VTEC OFF")
+        ttk.Label(ind, textvariable=self.vtec_big, font=("Segoe UI", 12, "bold")).pack(side="right", padx=12)
 
         # DTC box
         dtc = ttk.LabelFrame(self, text="DTC")
         dtc.pack(fill="both", expand=True, **pad)
 
-        self.dtc_text = tk.Text(dtc, height=6, width=64)
+        self.dtc_text = tk.Text(dtc, height=8)
         self.dtc_text.pack(fill="both", expand=True, padx=8, pady=6)
-        self.dtc_text.insert("end", "No DTC read yet.\n")
+        self._set_dtc_text(0, [])
         self.dtc_text.config(state="disabled")
 
+    def _set_lamp(self, canvas: tk.Canvas, on: bool):
+        canvas.itemconfig("lamp", fill=("lime" if on else "gray"))
+
     def _refresh_ports(self):
-        ports = []
-        for p in serial.tools.list_ports.comports():
-            ports.append(p.device)
+        ports = [p.device for p in serial.tools.list_ports.comports()]
         self.port_combo["values"] = ports
         if ports and not self.port_var.get():
             self.port_var.set(ports[0])
@@ -247,17 +268,10 @@ class App(tk.Tk):
     def _set_controls_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"
         self.btn_poll.config(state=state)
+        self.btn_dtc.config(state=state)
         self.btn_reset.config(state=state)
-        # The "Get DTC" button is the 2nd in ctrl frame; easiest: search children
-        # but we'll just set by index (safe enough here) -> find it:
-        for child in self.children.values():
-            pass
-        # direct: walk ctrl frame children
-        ctrl = self.winfo_children()[1]
-        for w in ctrl.winfo_children():
-            if isinstance(w, ttk.Button) and w.cget("text") == "Get DTC":
-                w.config(state=state)
 
+    # ---------- Serial ----------
     def _toggle_connect(self):
         if self.ser:
             self._disconnect()
@@ -311,6 +325,7 @@ class App(tk.Tk):
         except Exception as e:
             self.vars["status"].set(f"TX error: {e}")
 
+    # ---------- Buttons ----------
     def _toggle_poll(self):
         if not self.ser:
             return
@@ -320,18 +335,14 @@ class App(tk.Tk):
             self.vars["status"].set("Live polling…")
 
     def _get_dtc(self):
-        if not self.ser:
-            return
         self._write_cmd(CMD_GET_DTC)
 
     def _reset_ecu(self):
-        if not self.ser:
-            return
         if messagebox.askyesno("Confirm", "Send ECU RESET?"):
             self._write_cmd(CMD_RESET)
 
+    # ---------- RX thread ----------
     def _rx_loop(self):
-        # read bytes, parse frames
         while self.running:
             try:
                 if self.ser and self.ser.in_waiting:
@@ -341,21 +352,16 @@ class App(tk.Tk):
                 else:
                     time.sleep(0.01)
 
-                # parse as many frames as available
                 while True:
                     fr = self.parser.next_frame()
                     if fr is None:
                         break
                     mtype, payload = fr
-                    self._handle_frame(mtype, payload)
+                    self.after(0, lambda mt=mtype, pl=payload: self._handle_frame_ui(mt, pl))
 
             except Exception as e:
-                self.vars["status"].set(f"RX error: {e}")
+                self.after(0, lambda: self.vars["status"].set(f"RX error: {e}"))
                 time.sleep(0.2)
-
-    def _handle_frame(self, mtype: int, payload: bytes):
-        # Called from RX thread; queue to main thread for UI safety
-        self.after(0, lambda: self._handle_frame_ui(mtype, payload))
 
     def _handle_frame_ui(self, mtype: int, payload: bytes):
         if mtype == MSG_LIVE:
@@ -375,12 +381,11 @@ class App(tk.Tk):
             self.vars["o2"].set(f"{live.o2_v:.3f}")
 
             flags = live.flags
-            flag_str = []
-            if flags & (1 << 0): flag_str.append("A/C")
-            if flags & (1 << 1): flag_str.append("BRAKE")
-            if flags & (1 << 2): flag_str.append("VTEC")
-            if flags & (1 << 3): flag_str.append("CEL")
-            self.vars["flags"].set(", ".join(flag_str) if flag_str else "—")
+            self._set_lamp(self.lamps["ac"],    bool(flags & (1 << 0)))
+            self._set_lamp(self.lamps["brake"], bool(flags & (1 << 1)))
+            self._set_lamp(self.lamps["vtec"],  bool(flags & (1 << 2)))
+            self._set_lamp(self.lamps["cel"],   bool(flags & (1 << 3)))
+            self.vtec_big.set("VTEC ON" if (flags & (1 << 2)) else "VTEC OFF")
 
             if self.polling:
                 self.vars["status"].set("Live OK")
@@ -413,15 +418,13 @@ class App(tk.Tk):
         else:
             self.dtc_text.insert("end", "Raw DTC bytes:\n")
             self.dtc_text.insert("end", " ".join([f"0x{x:02X}" for x in dtcs]) + "\n\n")
-            self.dtc_text.insert("end", "If these are Honda blink codes, you can map them to P-codes later.\n")
+            self.dtc_text.insert("end", "If these are Honda blink codes, map later.\n")
         self.dtc_text.config(state="disabled")
 
+    # ---------- UI poll tick ----------
     def _ui_tick(self):
-        # polling loop driven from UI thread
         if self.ser and self.polling:
             self._write_cmd(CMD_GET_LIVE)
-
-        # schedule next tick
         ms = max(50, int(self.poll_ms.get() or 200))
         self.after(ms, self._ui_tick)
 
