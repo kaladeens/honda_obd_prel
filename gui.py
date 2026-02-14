@@ -5,6 +5,7 @@ import serial.tools.list_ports
 import threading
 import time
 from dataclasses import dataclass
+import math
 
 SOF1 = 0xAA
 SOF2 = 0x55
@@ -55,8 +56,9 @@ class FrameParser:
     """
     Parses frames:
       AA 55 type len payload... crc
+    CRC validation is OFF by default.
     """
-    def __init__(self, validate_crc=False):
+    def __init__(self, validate_crc: bool = False):
         self.buf = bytearray()
         self.validate_crc = validate_crc
 
@@ -76,7 +78,6 @@ class FrameParser:
 
             idx = self._find_sof()
             if idx < 0:
-                # keep last byte in case it's 0xAA
                 if len(self.buf) > 1:
                     self.buf = self.buf[-1:]
                 return None
@@ -138,17 +139,141 @@ def decode_live(payload: bytes) -> LiveData:
     )
 
 
+class Gauge(ttk.Frame):
+    """
+    Simple round gauge drawn on a Canvas.
+    - start_angle_deg and end_angle_deg define the sweep (degrees, canvas coords where 0° is at 3 o'clock, positive CCW)
+      We'll use a "car gauge" style: left-bottom to right-bottom sweep.
+    """
+    def __init__(self, parent, title: str, unit: str, vmin: float, vmax: float,
+                 major_step: float, minor_step: float,
+                 size: int = 220,
+                 start_angle_deg: float = 225.0,
+                 end_angle_deg: float = -45.0):
+        super().__init__(parent)
+        self.title = title
+        self.unit = unit
+        self.vmin = float(vmin)
+        self.vmax = float(vmax)
+        self.major_step = float(major_step)
+        self.minor_step = float(minor_step)
+        self.size = int(size)
+        self.start_angle = float(start_angle_deg)
+        self.end_angle = float(end_angle_deg)
+
+        self.value = self.vmin
+
+        self.canvas = tk.Canvas(self, width=self.size, height=self.size, highlightthickness=0)
+        self.canvas.pack()
+
+        self.center = (self.size // 2, self.size // 2)
+        self.radius = int(self.size * 0.38)
+
+        self._draw_static()
+        self.needle = None
+        self._draw_needle(self.vmin)
+
+    def _deg_to_rad(self, deg: float) -> float:
+        return deg * math.pi / 180.0
+
+    def _lerp(self, a: float, b: float, t: float) -> float:
+        return a + (b - a) * t
+
+    def _value_to_angle(self, v: float) -> float:
+        v = max(self.vmin, min(self.vmax, v))
+        t = (v - self.vmin) / (self.vmax - self.vmin) if self.vmax != self.vmin else 0.0
+        return self._lerp(self.start_angle, self.end_angle, t)
+
+    def _polar_to_xy(self, r: float, ang_deg: float):
+        ang = self._deg_to_rad(ang_deg)
+        cx, cy = self.center
+        x = cx + r * math.cos(ang)
+        y = cy - r * math.sin(ang)  # canvas y is down, so subtract
+        return x, y
+
+    def _draw_static(self):
+        cx, cy = self.center
+        r = self.radius
+
+        # Outer ring
+        self.canvas.create_oval(cx - r - 12, cy - r - 12, cx + r + 12, cy + r + 12, width=2)
+
+        # Title
+        self.canvas.create_text(cx, cy - r - 24, text=self.title, font=("Segoe UI", 11, "bold"))
+
+        # Unit text (small)
+        self.canvas.create_text(cx, cy + r + 24, text=self.unit, font=("Segoe UI", 10))
+
+        # Tick marks
+        # Major ticks with labels
+        v = self.vmin
+        while v <= self.vmax + 1e-9:
+            ang = self._value_to_angle(v)
+
+            # major tick
+            x1, y1 = self._polar_to_xy(r * 0.92, ang)
+            x2, y2 = self._polar_to_xy(r * 1.02, ang)
+            self.canvas.create_line(x1, y1, x2, y2, width=2)
+
+            # label
+            lx, ly = self._polar_to_xy(r * 0.72, ang)
+            label = f"{int(v)}" if abs(v - round(v)) < 1e-6 else f"{v:g}"
+            self.canvas.create_text(lx, ly, text=label, font=("Segoe UI", 9))
+
+            v += self.major_step
+
+        # Minor ticks
+        if self.minor_step > 0:
+            v = self.vmin
+            while v <= self.vmax + 1e-9:
+                if abs((v - self.vmin) % self.major_step) > 1e-6:
+                    ang = self._value_to_angle(v)
+                    x1, y1 = self._polar_to_xy(r * 0.95, ang)
+                    x2, y2 = self._polar_to_xy(r * 1.02, ang)
+                    self.canvas.create_line(x1, y1, x2, y2, width=1)
+                v += self.minor_step
+
+        # Digital readout
+        self.readout = self.canvas.create_text(cx, cy + r * 0.55, text="—", font=("Consolas", 16, "bold"))
+
+        # Center cap
+        self.canvas.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="black")
+
+    def _draw_needle(self, v: float):
+        cx, cy = self.center
+        r = self.radius
+        ang = self._value_to_angle(v)
+
+        x, y = self._polar_to_xy(r * 0.9, ang)
+
+        if self.needle is None:
+            self.needle = self.canvas.create_line(cx, cy, x, y, width=3)
+        else:
+            self.canvas.coords(self.needle, cx, cy, x, y)
+
+        # Update readout
+        if self.unit.lower() in ("km/h", "kph"):
+            self.canvas.itemconfig(self.readout, text=f"{int(round(v))}")
+        else:
+            # for rpm show integer
+            self.canvas.itemconfig(self.readout, text=f"{int(round(v))}")
+
+    def set_value(self, v: float):
+        self.value = float(v)
+        self._draw_needle(self.value)
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Honda OBD UNI2 - Live + DTC")
-        self.geometry("620x460")
-        self.resizable(False, False)
+        self.resizable(True, True)
+
 
         self.ser = None
         self.rx_thread = None
         self.running = False
-        self.parser = FrameParser(validate_crc=False)  # set True if mkcrc == sum-of-bytes
+        self.parser = FrameParser(validate_crc=False)
 
         self.polling = False
         self.poll_ms = tk.IntVar(value=200)
@@ -193,13 +318,25 @@ class App(tk.Tk):
         self.btn_reset = ttk.Button(ctrl, text="RESET ECU", command=self._reset_ecu, state="disabled")
         self.btn_reset.grid(row=0, column=4, **pad)
 
-        # Live values
-        live = ttk.LabelFrame(self, text="Live Data")
+        # Gauges row
+        gauges = ttk.Frame(self)
+        gauges.pack(fill="x", padx=8, pady=6)
+
+        # RPM gauge: 0..9000 (change if you want), majors 1000, minors 250
+        self.g_rpm = Gauge(gauges, title="RPM", unit="rpm", vmin=0, vmax=9000,
+                           major_step=1000, minor_step=250, size=260)
+        self.g_rpm.pack(side="left", padx=10, pady=10)
+
+        # Speed gauge: 0..240 km/h, majors 20, minors 10
+        self.g_vss = Gauge(gauges, title="SPEED", unit="km/h", vmin=0, vmax=240,
+                           major_step=20, minor_step=10, size=260)
+        self.g_vss.pack(side="left", padx=10)
+
+        # Live values (other)
+        live = ttk.LabelFrame(self, text="Live Data (Other)")
         live.pack(fill="x", **pad)
 
         self.vars = {
-            "rpm": tk.StringVar(value="—"),
-            "vss": tk.StringVar(value="—"),
             "ect": tk.StringVar(value="—"),
             "iat": tk.StringVar(value="—"),
             "map": tk.StringVar(value="—"),
@@ -210,7 +347,6 @@ class App(tk.Tk):
         }
 
         rows = [
-            ("RPM", "rpm", "VSS (km/h)", "vss"),
             ("ECT (°C)", "ect", "IAT (°C)", "iat"),
             ("MAP", "map", "TPS (%)", "tps"),
             ("Batt (V)", "batt", "O2 (V)", "o2"),
@@ -219,13 +355,13 @@ class App(tk.Tk):
 
         for r, (l1, k1, l2, k2) in enumerate(rows):
             ttk.Label(live, text=l1 + ":").grid(row=r, column=0, sticky="e", **pad)
-            ttk.Label(live, textvariable=self.vars[k1], width=16).grid(row=r, column=1, sticky="w", **pad)
+            ttk.Label(live, textvariable=self.vars[k1], width=18).grid(row=r, column=1, sticky="w", **pad)
             if l2:
                 ttk.Label(live, text=l2 + ":").grid(row=r, column=2, sticky="e", **pad)
                 ttk.Label(live, textvariable=self.vars[k2], width=22).grid(row=r, column=3, sticky="w", **pad)
 
         # Indicators
-        ind = ttk.LabelFrame(self, text="Indicators (from flags byte)")
+        ind = ttk.LabelFrame(self, text="Indicators (flags byte)")
         ind.pack(fill="x", **pad)
 
         self.lamps = {}
@@ -271,7 +407,6 @@ class App(tk.Tk):
         self.btn_dtc.config(state=state)
         self.btn_reset.config(state=state)
 
-    # ---------- Serial ----------
     def _toggle_connect(self):
         if self.ser:
             self._disconnect()
@@ -325,7 +460,6 @@ class App(tk.Tk):
         except Exception as e:
             self.vars["status"].set(f"TX error: {e}")
 
-    # ---------- Buttons ----------
     def _toggle_poll(self):
         if not self.ser:
             return
@@ -341,7 +475,6 @@ class App(tk.Tk):
         if messagebox.askyesno("Confirm", "Send ECU RESET?"):
             self._write_cmd(CMD_RESET)
 
-    # ---------- RX thread ----------
     def _rx_loop(self):
         while self.running:
             try:
@@ -371,8 +504,11 @@ class App(tk.Tk):
                 self.vars["status"].set(f"Decode live error: {e}")
                 return
 
-            self.vars["rpm"].set(str(live.rpm))
-            self.vars["vss"].set(str(live.vss))
+            # Gauges
+            self.g_rpm.set_value(live.rpm)
+            self.g_vss.set_value(live.vss)
+
+            # Other text fields
             self.vars["ect"].set(f"{live.ect_c:.1f}")
             self.vars["iat"].set(f"{live.iat_c:.1f}")
             self.vars["map"].set(f"{live.map_kpa:.1f}")
@@ -421,7 +557,6 @@ class App(tk.Tk):
             self.dtc_text.insert("end", "If these are Honda blink codes, map later.\n")
         self.dtc_text.config(state="disabled")
 
-    # ---------- UI poll tick ----------
     def _ui_tick(self):
         if self.ser and self.polling:
             self._write_cmd(CMD_GET_LIVE)
