@@ -122,6 +122,7 @@ public:
     int lmt = 0;  // limiter flags
     int iacv = 0; // idle air control valve duty
     int knoc = 0; // knock count/value
+    int mafs = 0; //
 
     float volt = 0.0; // battery voltage
     float o2 = 0.0;   // primary O2 sensor voltage

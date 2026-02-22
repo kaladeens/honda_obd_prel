@@ -1,6 +1,6 @@
 #include "hobd_uni2.hpp" // your ECUData + offsets + sendcmd + readLiveData + scanDtc
 
-SoftwareSerialWithHalfDuplex dlcSerial(12, 12, false, false);
+SoftwareSerialWithHalfDuplex dlcSerial(8, 8, false, false);
 
 // ECU logic wrapper
 ECUData ecu(1 /*obd_sel*/, dlcSerial);
@@ -87,21 +87,34 @@ static void pack_live(uint8_t *p, const ECUData &e)
   flags |= e.sw_vtec ? (1 << 2) : 0;
   flags |= e.cel ? (1 << 3) : 0;
   p[15] = flags;
+
+  p[16] = e.maf;
+}
+
+Stream &link = Serial;
+
+bool pollEvery(uint16_t ms){
+  static uint32_t msTick = millis();
+  if (millis() - msTick < ms){
+    return true;
+  }
+  msTick = millis();
+  return ecu.readLiveData();
 }
 
 void loop()
 {
-  // Choose which link you want to listen on:
-  // 1) USB Serial
-  Stream &link = Serial;
-
-  // If you want HC-05 instead, swap to:
   // Stream &link = btSerial;
+
+  // if (!pollEvery(250)){
+  //   const uint8_t err = 1;
+  //   sendFrame(link, MSG_ERR, &err, 1);
+  //   return;
+  // }
 
   uint8_t cmd;
   if (!readCmdFrame(link, cmd))
     return;
-
   if (cmd == CMD_GET_LIVE)
   {
     if (!ecu.readLiveData())
@@ -110,7 +123,7 @@ void loop()
       sendFrame(link, MSG_ERR, &err, 1);
       return;
     }
-    uint8_t payload[16];
+    uint8_t payload[17];
     pack_live(payload, ecu);
     sendFrame(link, MSG_LIVE, payload, sizeof(payload));
   }
@@ -147,6 +160,7 @@ void setup()
   // pin 12 for 1 wire
   Serial.begin(115200);
   dlcSerial.begin(9600);
+  delay(1000);
   ecu.init();
   delay(1000);
 }
