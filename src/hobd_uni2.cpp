@@ -3,21 +3,10 @@
 const uint8_t startup[] = {0x68, 0x6a, 0xf5, 0xaf, 0xbf, 0xb3, 0xb2, 0xc1, 0xdb, 0xb3, 0xe9};
 
 bool ECUData::init(){
-    // uint8_t n = sizeof(startup)/sizeof(startup[0]);
-    // for (uint8_t i = 0; i < n; i++){
-    //     dlc.write(startup[i]);
-    // }
-    dlc.write(0x68);
-    dlc.write(0x6a);
-    dlc.write(0xf5);
-    dlc.write(0xaf);
-    dlc.write(0xbf);
-    dlc.write(0xb3);
-    dlc.write(0xb2);
-    dlc.write(0xc1);
-    dlc.write(0xdb);
-    dlc.write(0xb3);
-    dlc.write(0xe9);
+    uint8_t n = sizeof(startup)/sizeof(startup[0]);
+    for (uint8_t i = 0; i < n; i++){
+        dlc.write(startup[i]);
+    }
     delay(300);
     return true;
 }
@@ -40,8 +29,9 @@ bool ECUData::sendcmd(EcuCmd &ecmd){
     tx[1] = ecmd.txlen;
     tx[2] = ecmd.reg;
     tx[3] = ecmd.rxlen;
-    // tx[4] = mkcrc(tx, 4); // checksum over first 4 bytes
-    uint8_t crc = (0xFF - (ecmd.cmd + ecmd.txlen + ecmd.reg + ecmd.rxlen - 0x01));
+    tx[4] = mkcrc(tx, 4); // checksum over first 4 bytes
+    uint8_t crc = tx[4]; /*(0xFF - (ecmd.cmd + ecmd.txlen + ecmd.reg + ecmd.rxlen - 0x01));
+    */
     tx[4] = crc;
     ecmd.crc = tx[4];
 
@@ -49,32 +39,6 @@ bool ECUData::sendcmd(EcuCmd &ecmd){
     dlc.listen();
     memset(dlcData, 0, sizeof(dlcData));
 
-    // dlc.listen();
-    // dlc.write(ecmd.cmd); // header/cmd read memory ??
-    // dlc.write(ecmd.txlen); // num of bytes to send
-    // dlc.write(ecmd.reg); // address
-    // dlc.write(ecmd.rxlen); // num of bytes to read
-    // dlc.write(crc); // checksum
-
-    // Serial.print("Sending Command");
-    // Serial.println(ecmd.reg);
-    // reply: 00 len+3 data...
-    // int i = 0;
-    // while (i < (ecmd.rxlen + 3))
-    // {
-    //     if (dlc.available())
-    //     {
-    //         dlcData[i] = dlc.read();
-    //         // Serial.print("rx data");
-    //         // Serial.println(dlcData[i]);
-    //         // if (dlcdata[i] != 0x00 && dlcdata[i+1] != (len+3)) continue; // ignore ?
-    //         i++;
-    //     }
-    // }
-    // Serial.print("Received data of len ");
-    // Serial.println(i);
-    // Serial.print("expected data of len ");
-    // Serial.println(ecmd.rxlen);
 
     for (uint8_t i = 0; i < 5; ++i) dlc.write(tx[i]);
 
@@ -135,41 +99,20 @@ bool ECUData::scanDtc(){
     const uint8_t maxCodes = sizeof(dtcErrs) / sizeof(dtcErrs[0]);
     uint8_t i;
     // Serial.print("dtc things");
-    for (i = 0; i < 14; i++)
+    for (uint8_t i = 0; i < ErrLen; ++i)
     {
-        if (dlcData[i + 2] >> 4)
-        {
-            dtcErrs[i] = i * 2;
-            dtcLen++;
+        uint8_t b = dlcData[(MSG_OFFSET - 1) + i];
+
+        if (b >> 4){
+            dtcErrs[dtcLen++] = i * 2;
         }
-        if (dlcData[i + 2] & 0xf)
-        {
-            // haxx
-            // if (errnum == 23) errnum = 22;
-            // if (errnum == 24) errnum = 23;
-            dtcErrs[i] = (i * 2) + 1;
-            // haxx
-            if (dtcErrs[i] == 23)
-                dtcErrs[i] = 22;
-            if (dtcErrs[i] == 24)
-                dtcErrs[i] = 23;
-            dtcLen++;
+        if (b & 0x0F){
+            uint8_t errN = i * 2 + 1;
+            if (errN == 23 || errN == 24)
+                errN--;
+            dtcErrs[dtcLen++] = errN;
         }
     }
-    // for (uint8_t i = 0; i < ErrLen; ++i)
-    // {
-    //     uint8_t b = dlcData[(MSG_OFFSET - 1) + i];
-
-    //     if (b >> 4){
-    //         dtcErrs[dtcLen++] = i * 2;
-    //     }
-    //     if (b & 0x0F){
-    //         uint8_t errN = i * 2 + 1;
-    //         if (errN == 23 || errN == 24)
-    //             errN--;
-    //         dtcErrs[dtcLen++] = errN;
-    //     }
-    // }
     // Serial.println(dtcLen);
     // Serial.print("");
 
