@@ -33,6 +33,7 @@ class LiveData:
     batt_v: float = 0.0
     o2_v: float = 0.0
     flags: int = 0
+    maf: int = 0
 
 
 def u16(hi, lo) -> int:
@@ -114,8 +115,9 @@ class FrameParser:
 
 
 def decode_live(payload: bytes) -> LiveData:
-    if len(payload) != 16:
-        raise ValueError(f"Expected 16 bytes live payload, got {len(payload)}")
+    print(payload.hex())
+    if len(payload) != 18:
+        raise ValueError(f"Expected 17 bytes live payload, got {len(payload)}")
 
     rpm = u16(payload[0], payload[1])
     vss = payload[2]
@@ -126,16 +128,18 @@ def decode_live(payload: bytes) -> LiveData:
     tps = s16(payload[9], payload[10]) / 10.0
 
     batt = u16(payload[11], payload[12]) / 100.0
-    o2 = u16(payload[13], payload[14]) / 1000.0
+    o2 = u16(payload[13], payload[14]) / 100.0
 
     flags = payload[15]
+
+    maf = u16(payload[16], payload[17])
 
     return LiveData(
         rpm=rpm, vss=vss,
         ect_c=ect, iat_c=iat,
         map_kpa=mapv, tps_pct=tps,
         batt_v=batt, o2_v=o2,
-        flags=flags
+        flags=flags, maf=maf
     )
 
 
@@ -343,6 +347,7 @@ class App(tk.Tk):
             "tps": tk.StringVar(value="—"),
             "batt": tk.StringVar(value="—"),
             "o2": tk.StringVar(value="—"),
+            "maf": tk.StringVar(value="—"),
             "status": tk.StringVar(value="Disconnected"),
         }
 
@@ -350,7 +355,7 @@ class App(tk.Tk):
             ("ECT (°C)", "ect", "IAT (°C)", "iat"),
             ("MAP", "map", "TPS (%)", "tps"),
             ("Batt (V)", "batt", "O2 (V)", "o2"),
-            ("Status", "status", "", ""),
+            ("Status", "status", "Maf", "maf"),
         ]
 
         for r, (l1, k1, l2, k2) in enumerate(rows):
@@ -515,6 +520,7 @@ class App(tk.Tk):
             self.vars["tps"].set(f"{live.tps_pct:.1f}")
             self.vars["batt"].set(f"{live.batt_v:.2f}")
             self.vars["o2"].set(f"{live.o2_v:.3f}")
+            self.vars["maf"].set(f"{live.maf:.1f}")
 
             flags = live.flags
             self._set_lamp(self.lamps["ac"],    bool(flags & (1 << 0)))
@@ -529,6 +535,7 @@ class App(tk.Tk):
         elif mtype == MSG_DTC:
             if not payload:
                 return
+            print("payload", payload.hex())
             count = payload[0]
             dtcs = list(payload[1:1+count])
             self._set_dtc_text(count, dtcs)

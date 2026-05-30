@@ -110,10 +110,10 @@ public:
     // ECU Sensor Data (Raw Inputs)
     // ==============================
     int rpm = 0;  // engine speed
-    int ect = 0;  // engine coolant temp
-    int iat = 0;  // intake air temp
-    int maps = 0; // manifold absolute pressure
-    int baro = 0; // barometric pressure
+    float ect = 0;  // engine coolant temp
+    float iat = 0;  // intake air temp
+    float maps = 0; // manifold absolute pressure
+    float baro = 0; // barometric pressure
     int tps = 0;  // throttle position
     int sft = 0;  // short term fuel trim
     int lft = 0;  // long term fuel trim
@@ -124,7 +124,7 @@ public:
     int knoc = 0; // knock count/value
     int mafs = 0; //
 
-    float volt = 0.0; // battery voltage
+    float k = 0.0; // battery voltage
     float o2 = 0.0;   // primary O2 sensor voltage
     uint8_t vss = 0;  // vehicle speed sensor (raw)
     float alt_fr = 0.0; // alternator load

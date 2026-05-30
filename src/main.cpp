@@ -59,10 +59,10 @@ static void pack_live(uint8_t *p, const ECUData &e)
   p[1] = rpm & 0xFF;
   p[2] = e.vss;
 
-  int16_t ect = (int16_t)(e.ect * 10.0f);
-  int16_t iat = (int16_t)(e.iat * 10.0f);
-  int16_t map = (int16_t)(e.maps * 10.0f);
-  int16_t tps = (int16_t)(e.tps * 10.0f);
+  uint16_t ect = (uint16_t)(e.ect * 10.0f);
+  uint16_t iat = (uint16_t)(e.iat * 10.0f);
+  uint16_t map = (uint16_t)(e.maps * 10.0f);
+  uint16_t tps = (uint16_t)(e.tps * 10.0f);
 
   p[3] = ect >> 8;
   p[4] = ect & 0xFF;
@@ -77,7 +77,7 @@ static void pack_live(uint8_t *p, const ECUData &e)
   p[11] = batt >> 8;
   p[12] = batt & 0xFF;
 
-  uint16_t o2mv = (uint16_t)(e.o2 * 1000.0f);
+  uint16_t o2mv = (uint16_t)(e.o2 * 100.0f);
   p[13] = o2mv >> 8;
   p[14] = o2mv & 0xFF;
 
@@ -88,7 +88,8 @@ static void pack_live(uint8_t *p, const ECUData &e)
   flags |= e.cel ? (1 << 3) : 0;
   p[15] = flags;
 
-  p[16] = e.maf;
+  p[16] = e.maf >> 8;
+  p[17] = e.maf & 0xFF;
 }
 
 Stream &link = Serial;
@@ -123,7 +124,7 @@ void loop()
       sendFrame(link, MSG_ERR, &err, 1);
       return;
     }
-    uint8_t payload[17];
+    uint8_t payload[18];
     pack_live(payload, ecu);
     sendFrame(link, MSG_LIVE, payload, sizeof(payload));
   }
