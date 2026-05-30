@@ -218,8 +218,6 @@ bool ECUData::readLiveData()
         if (!sendcmd(cmd))
             return false;
 
-        // These are row3 payload indices, not global offsets (unless you have defines).
-        // Keeping your original positions relative to row3:
         const uint8_t sft_raw = dlcData[RPL_OFFSET];
         const uint8_t lft_raw = dlcData[RPL_OFFSET + 1];
 
