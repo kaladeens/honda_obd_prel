@@ -1,5 +1,6 @@
 #include "hobd_uni2.hpp"
 
+// specialised startup sequence 
 const uint8_t startup[] = {0x68, 0x6a, 0xf5, 0xaf, 0xbf, 0xb3, 0xb2, 0xc1, 0xdb, 0xb3, 0xe9};
 
 bool ECUData::init(){
@@ -23,32 +24,26 @@ bool ECUData::sendcmd(EcuCmd &ecmd){
     // Build TX frame: [cmd, txlen, reg, rxlen, crc]
 
     memset(dlcData, 0, sizeof(dlcData));
-
-    uint8_t tx[5];
+    uint8_t cmdlen = 5;
+    uint8_t tx[cmdlen];
     tx[0] = ecmd.cmd;
     tx[1] = ecmd.txlen;
     tx[2] = ecmd.reg;
     tx[3] = ecmd.rxlen;
-    tx[4] = mkcrc(tx, 4); // checksum over first 4 bytes
-    uint8_t crc = tx[4]; /*(0xFF - (ecmd.cmd + ecmd.txlen + ecmd.reg + ecmd.rxlen - 0x01));
-    */
-    tx[4] = crc;
-    ecmd.crc = tx[4];
+    tx[4] = mkcrc(tx, cmdlen -1); // checksum over first 4 bytes
+    ecmd.crc = tx[cmdlen - 1];    // (0xFF - (ecmd.cmd + ecmd.txlen + ecmd.reg + ecmd.rxlen - 0x01));
 
     // TX
     dlc.listen();
-    memset(dlcData, 0, sizeof(dlcData));
-
-
-    for (uint8_t i = 0; i < 5; ++i) dlc.write(tx[i]);
+    for (uint8_t i = 0; i < cmdlen; ++i) dlc.write(tx[i]);
 
     const uint16_t expected = (uint16_t)ecmd.rxlen + (uint16_t)MSG_OFFSET;
 
     const uint32_t tStart = millis();
-    const uint32_t timeoutMs = 200;
+    const uint32_t timeoutMs = 500;
 
     uint16_t i = 0;
-    while (i < expected/*&& (millis() - tStart) < timeoutMs*/)
+    while (i < expected && (millis() - tStart) < timeoutMs)
     {
         if (dlc.available())
         {
@@ -63,15 +58,6 @@ bool ECUData::sendcmd(EcuCmd &ecmd){
         return false;
     }
 
-    // crc = 0;
-    // for (uint8_t j = 0; j < i + 2; j++)
-    // {
-    //     crc = crc + dlcData[j];
-    // }
-    // crc = 0xFF - (crc - 1);
-
-    // Verify checksum: last byte is checksum for entire response minus itself
-    // e.g. checksum256(resp, resp_len_without_checksum) should equal last byte.
     const uint8_t rxCrc = dlcData[expected - 1];
     const uint8_t calc = mkcrc(dlcData, expected - 1);
 
@@ -96,9 +82,6 @@ bool ECUData::scanDtc(){
     if (!sendcmd(cmd))
         return false;
 
-    const uint8_t maxCodes = sizeof(dtcErrs) / sizeof(dtcErrs[0]);
-    uint8_t i;
-    // Serial.print("dtc things");
     for (uint8_t i = 0; i < ErrLen; ++i)
     {
         uint8_t b = dlcData[(MSG_OFFSET - 1) + i];

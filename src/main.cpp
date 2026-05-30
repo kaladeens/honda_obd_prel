@@ -146,7 +146,7 @@ void loop()
   else if (cmd == CMD_RESET)
   {
     bool ok = ecu.resetEcu();
-    uint8_t payload[1] = {ok ? 1 : 0};
+    uint8_t payload[1] = {(uint8_t)(ok ? 1 : 0)};
     sendFrame(link, MSG_ACK, payload, 1);
   }
   else

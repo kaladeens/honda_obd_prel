@@ -15,7 +15,7 @@
 #define HOBD_RST 0x21
 
 // ==========================
-// Offsets (match your table / map)
+// Offsets
 // ==========================
 // Word (big-endian)
 #define HOBD_OFF_RPM 0x00
@@ -124,7 +124,7 @@ public:
     int knoc = 0; // knock count/value
     int mafs = 0; //
 
-    float k = 0.0; // battery voltage
+    float volt = 0.0; // battery voltage
     float o2 = 0.0;   // primary O2 sensor voltage
     uint8_t vss = 0;  // vehicle speed sensor (raw)
     float alt_fr = 0.0; // alternator load
