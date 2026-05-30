@@ -96,9 +96,6 @@ bool ECUData::scanDtc(){
             dtcErrs[dtcLen++] = errN;
         }
     }
-    // Serial.println(dtcLen);
-    // Serial.print("");
-
     return true;
 }
 

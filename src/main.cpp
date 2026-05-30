@@ -39,8 +39,6 @@ static void sendFrame(Stream &out, uint8_t type, const uint8_t *payload, uint8_t
 
 static bool readCmdFrame(Stream &in, uint8_t &cmdOut)
 {
-  // Very simple: expects 1 byte command only.
-  // You can upgrade later to full framed commands if needed.
   if (!in.available())
     return false;
   cmdOut = (uint8_t)in.read();
@@ -48,7 +46,6 @@ static bool readCmdFrame(Stream &in, uint8_t &cmdOut)
 }
 
 // Pack floats as int16/int32 to keep payload small and easy.
-// Scale choices are yours; these are sensible defaults.
 static void pack_live(uint8_t *p, const ECUData &e)
 {
   // layout:
